@@ -1,4 +1,4 @@
-"""逆变器监视接口：维护逆变器，覆盖恢复运行、降容保护、安排检修等动作。"""
+"""逆变器监视接口：维护逆变器，覆盖恢复运行、降容保护、升级高温报警、安排检修等动作。"""
 from __future__ import annotations
 
 from typing import Any
@@ -30,6 +30,16 @@ def list_entries(
     return PageResult(items=items, total=total, page=page, size=size)
 
 
+@router.get("/export")
+def export_entries(
+    keyword: str | None = Query(default=None, description="按逆变器编号检索"),
+    status: str | None = Query(default=None, description="正常运行、降容运行、高温报警、待检修"),
+) -> dict[str, Any]:
+    """导出逆变器监视清单：与列表走同一份查询，已停用机组不计入，条数与列表一致。"""
+    items, total = service.list_entries(keyword=keyword, status=status, page=1, size=10000)
+    return {"module": "inverter", "total": total, "items": items}
+
+
 @router.get("/{entry_id}", response_model=dict)
 def get_entry(entry_id: int) -> dict:
     """读取单条逆变器明细；不存在时给出可读的错误说明。"""
@@ -48,18 +58,20 @@ def create_entry(payload: EntryPayload) -> ActionResult:
     return ActionResult(ok=True, message="逆变器已登记", entry=entry)
 
 
-@router.post("/{entry_id}/actions", response_model=ActionResult)
-def run_action(entry_id: int, payload: EntryPayload) -> ActionResult:
-    """对单条逆变器执行恢复运行、降容保护、安排检修；不允许的动作会被拦下并说明原因。"""
-    action = str(payload.values.get("action") or "").strip()
-    entry, message = service.run_action(entry_id, action)
+@router.put("/{entry_id}", response_model=ActionResult)
+def update_entry(entry_id: int, payload: EntryPayload) -> ActionResult:
+    """回写额定功率等业务字段；保存后列表、单条与导出读到同一份数据。"""
+    entry, message = service.update_entry(entry_id, payload.values)
     if entry is None:
         return ActionResult(ok=False, message=message)
     return ActionResult(ok=True, message=message, entry=entry)
 
 
-@router.get("/export")
-def export_entries() -> dict[str, Any]:
-    """导出逆变器监视清单：返回当前过滤条件下的全量数据。"""
-    items, total = service.list_entries(page=1, size=10000)
-    return {"module": "inverter", "total": total, "items": items}
+@router.post("/{entry_id}/actions", response_model=ActionResult)
+def run_action(entry_id: int, payload: EntryPayload) -> ActionResult:
+    """对单条逆变器执行恢复运行、降容保护、升级高温报警、安排检修；不允许的动作会被拦下并说明原因。"""
+    action = str(payload.values.get("action") or "").strip()
+    entry, message = service.run_action(entry_id, action)
+    if entry is None:
+        return ActionResult(ok=False, message=message)
+    return ActionResult(ok=True, message=message, entry=entry)
